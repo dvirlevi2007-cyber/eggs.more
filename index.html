@@ -661,14 +661,32 @@ function subscribeCourierRoute(){
   if(courierChannel){ sb.removeChannel(courierChannel); courierChannel = null; }
   if(!courierRouteId) return;
   courierChannel = sb.channel('courier-route-'+courierRouteId)
-    .on('postgres_changes', {event:'UPDATE', schema:'public', table:'routes', filter:'id=eq.'+courierRouteId}, (payload)=>{
-      const incoming = (payload.new && payload.new.customers) || [];
-      // הד של עדכון שהשליח עצמו שלח - נתוני ההזמנה זהים, מתעלמים
-      if(orderSig(incoming) === orderSig(state.customers)) return;
-      applyAdminUpdate(incoming);
+    .on('postgres_changes', {event:'UPDATE', schema:'public', table:'routes', filter:'id=eq.'+courierRouteId}, ()=>{
+      // לא סומכים על התוכן שמגיע בהודעה: כשמעדכנים רק עמודה אחרת (למשל הערה כללית),
+      // Supabase שולח את customers ריק כי היא לא השתנתה - וזה מחק את כל הלקוחות.
+      // במקום זה קוראים את הסיבוב מחדש מהענן.
+      refreshCourierRouteFromCloud();
     })
     .subscribe();
 }
+
+// קורא את הסיבוב מהענן ומכניס שינויים של האחראי, בלי לדרוס את מה שהשליח סימן
+async function refreshCourierRouteFromCloud(){
+  if(currentRole !== 'courier' || !courierRouteId) return null;
+  const {data, error} = await sb.from('routes').select('customers').eq('id', courierRouteId).single();
+  if(error || !data) return null;
+  const incoming = data.customers || [];
+  // הגנה: רשימה ריקה מהענן לעולם לא מוחקת רשימה מלאה אצל השליח
+  if(!incoming.length && state.customers.length) return data;
+  // הד של עדכון שהשליח עצמו שלח - נתוני ההזמנה זהים, מתעלמים
+  if(orderSig(incoming) !== orderSig(state.customers)) applyAdminUpdate(incoming);
+  return data;
+}
+
+// השליח חוזר לאפליקציה (מסך נדלק, חזר מוויז) - מושכים עדכונים שאולי פוספסו בזמן שהמסך היה כבוי
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') refreshCourierRouteFromCloud();
+});
 
 function applyAdminUpdate(incoming){
   const localMap = new Map(state.customers.map(c=>[customerKey(c), c]));
@@ -1145,6 +1163,10 @@ async function publishRouteToSupabase(){
 ========================================================= */
 async function syncCourierState(){
   if(currentRole !== 'courier' || !courierRouteId) return;
+  // הגנה: לעולם לא שומרים רשימה ריקה על סיבוב
+  if(!state.customers.length) return;
+  // לפני ששומרים - בודקים אם האחראי שינה משהו בינתיים וממזגים, כדי לא לדרוס את השינוי שלו
+  await refreshCourierRouteFromCloud();
   await sb.from('routes').update({
     customers: state.customers,
     current_index: state.currentIndex

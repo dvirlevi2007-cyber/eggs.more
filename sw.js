@@ -1,4 +1,4 @@
-const CACHE_NAME = 'eggs-app-v2'; // חשוב: להעלות את המספר הזה בכל פעם שמעדכנים כדי לבטל מטמון ישן
+const CACHE_NAME = 'eggs-app-v3'; // חשוב: להעלות את המספר הזה בכל פעם שמעדכנים כדי לבטל מטמון ישן
 const CORE_ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
